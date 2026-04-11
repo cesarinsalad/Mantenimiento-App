@@ -6,39 +6,83 @@ export default function Scanner() {
   const navigate = useNavigate();
   const [errorCamara, setErrorCamara] = useState(false);
 
-useEffect(() => {
+  useEffect(() => {
     const html5QrCode = new Html5Qrcode("reader");
+    let isMounted = true;
+    let isCameraActive = false; // Solo true cuando start() completó
+    let isStopping = false; // Previsión para que stop() actúe una sola vez
+    let streamRef = null;
     
-    // Dejamos la configuración nativa que funciona perfecto
     const config = { fps: 15, qrbox: { width: 250, height: 250 } };
+
+    // Buscamos el elemento de video continuamente de las entrañas ocultas
+    // de la librería para "robar" la referencia directa la cámara
+    const intervalId = setInterval(() => {
+      const videoElement = document.querySelector("#reader video");
+      if (videoElement && videoElement.srcObject) {
+        streamRef = videoElement.srcObject;
+        clearInterval(intervalId);
+      }
+    }, 100);
+
+    const stopCameraAndNavigate = async (decodedText) => {
+      if (isStopping) return;
+      isStopping = true;
+      clearInterval(intervalId); // Detenemos la búsqueda si apenas comenzó
+
+      // 1. FORZAR APAGADO DE HARDWARE: 
+      try {
+        if (streamRef) {
+          streamRef.getTracks().forEach(track => track.stop());
+        } else {
+          // Fallback por si la cámara se detuvo en el mismo milisegundo o no encontró el stream antes
+          const videoElement = document.querySelector("#reader video");
+          if (videoElement && videoElement.srcObject) {
+            videoElement.srcObject.getTracks().forEach(track => track.stop());
+          }
+        }
+      } catch (e) {
+        console.error("Error forzando apagado de tracks", e);
+      }
+
+      // 2. DETENER LIBRERÍA:
+      try {
+        if (isCameraActive) {
+          await html5QrCode.stop();
+        }
+        html5QrCode.clear();
+      } catch (e) {
+        console.error("Ignorado fallo al detener cámara: ", e);
+      } finally {
+        if (decodedText) {
+          navigate(`/equipo/${decodedText}`);
+        }
+      }
+    };
 
     html5QrCode.start(
       { facingMode: "environment" },
       config,
       (decodedText) => {
-        // ÉXITO: Paramos la cámara y limpiamos ANTES de navegar
-        if (html5QrCode.isScanning) {
-          html5QrCode.stop().then(() => {
-            html5QrCode.clear(); // Destruye el elemento HTML oculto
-            navigate(`/equipo/${decodedText}`);
-          }).catch(err => console.error(err));
-        }
+        // En vez de parar y desencadenar un montón de fallos si se cruza con el return(),
+        // llamamos a nuestra función blindada.
+        if (isMounted) stopCameraAndNavigate(decodedText);
       },
-      () => { /* Ignoramos el spam de la consola */ }
-    ).catch(() => {
-      setErrorCamara(true);
+      () => { /* Ignoramos spam */ }
+    ).then(() => {
+      isCameraActive = true;
+      if (!isMounted) {
+        // Si el usuario presionó volver mientras se estaba encendiendo la cámara
+        stopCameraAndNavigate(null);
+      }
+    }).catch(() => {
+      if (isMounted) setErrorCamara(true);
     });
 
-    // LIMPIEZA: Cuando el usuario presiona "Atrás" o cierra el componente
     return () => {
-      if (html5QrCode.isScanning) {
-        // Esperamos a que se detenga y LUEGO limpiamos la memoria
-        html5QrCode.stop().then(() => {
-          html5QrCode.clear(); // APAGA EL HARDWARE DEL TELÉFONO
-        }).catch(() => {
-          // Silenciamos errores si se cerró demasiado rápido
-        });
-      }
+      isMounted = false;
+      clearInterval(intervalId);
+      stopCameraAndNavigate(null);
     };
   }, [navigate]);
 

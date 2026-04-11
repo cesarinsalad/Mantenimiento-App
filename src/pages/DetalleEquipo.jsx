@@ -191,13 +191,12 @@ useEffect(() => {
       
       {/* --- EL CÓDIGO DE LA FICHA QUE YA TENÍAMOS (Resumido para enfocar en lo nuevo) --- */}
       <div className="flex justify-between items-center px-6 pt-12 pb-4 sticky top-0 bg-[#F8F9FA]/90 backdrop-blur-md z-10">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-slate-200 transition">
+        <button onClick={() => navigate(equipo?.ubicacion ? `/dashboard/${equipo.ubicacion}` : '/')} className="p-2 -ml-2 rounded-full hover:bg-slate-200 transition">
           <svg className="w-6 h-6 text-slate-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
         </button>
         <h1 className="font-extrabold text-lg">Detalles del Equipo</h1>
-        <button className="p-2 -mr-2 rounded-full hover:bg-slate-200 transition">
-          <svg className="w-5 h-5 text-slate-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-        </button>
+        {/* Elemento fantasma para balancear el título con justify-between tras eliminar el botón de edición */}
+        <div className="w-10 h-10"></div>
       </div>
 
 
