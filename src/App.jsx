@@ -6,6 +6,7 @@ import Welcome from './pages/Welcome';
 import Dashboard from './pages/Dashboard';
 import Scanner from './pages/Scanner';
 import DetalleEquipo from './pages/DetalleEquipo';
+import AdminPanel from './pages/Admin/AdminPanel';
 
 function App() {
   const [session, setSession] = useState(null);
@@ -36,6 +37,9 @@ function App() {
           <Route path="/dashboard/:ubicacion" element={session ? <Dashboard /> : <Navigate to="/login" />} />
           <Route path="/escaner" element={session ? <Scanner /> : <Navigate to="/login" />} />
           <Route path="/equipo/:id" element={session ? <DetalleEquipo /> : <Navigate to="/login" />} />
+          
+          {/* Panel de Administración */}
+          <Route path="/admin" element={session ? <AdminPanel /> : <Navigate to="/login" />} />
         </Routes>
       </div>
     </Router>

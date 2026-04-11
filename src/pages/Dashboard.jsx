@@ -13,11 +13,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function fetchEquipos() {
-      // 1. Traemos TODOS los equipos de esta sede
+      // 1. Traemos TODOS los equipos activos de esta sede
       const { data, error } = await supabase
         .from('equipos')
         .select('*')
-        .eq('ubicacion', ubicacion);
+        .eq('ubicacion', ubicacion)
+        .eq('activo', true);
       
       if (data) {
         const hoy = new Date();
