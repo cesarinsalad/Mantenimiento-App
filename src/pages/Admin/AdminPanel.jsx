@@ -18,7 +18,7 @@ export default function AdminPanel() {
         return;
       }
       const { data } = await supabase.from('perfiles').select('rol').eq('id', user.id).single();
-      if (!data || data.rol !== 'ADMIN') {
+      if (!data || String(data.rol).toUpperCase() !== 'ADMIN') {
         navigate('/'); // Expulsar si no es admin
       } else {
         setVerificando(false);

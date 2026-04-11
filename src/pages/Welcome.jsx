@@ -31,7 +31,7 @@ export default function Welcome() {
             setNombreUsuario(user.email.split('@')[0]);
           }
           
-          setIsAdmin(data.rol === 'ADMIN');
+          setIsAdmin(String(data.rol).toUpperCase() === 'ADMIN');
         } else {
           setNombreUsuario(user.email.split('@')[0]);
         }

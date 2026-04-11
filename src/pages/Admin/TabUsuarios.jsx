@@ -1,13 +1,5 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { createClient } from '@supabase/supabase-js';
-
-// Cliente Secundario Sigiloso: No guarda sesión ni pisa la del Admin.
-const supabaseAdmin = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } }
-);
 
 export default function TabUsuarios() {
   const [usuarios, setUsuarios] = useState([]);
@@ -22,7 +14,7 @@ export default function TabUsuarios() {
     password: '',
     nombre: '',
     cargo: '',
-    rol: 'USER'
+    rol: 'user'
   });
 
   const fetchUsuarios = async () => {
@@ -44,24 +36,58 @@ export default function TabUsuarios() {
   }, []);
 
   const alternarRol = async (id, rolActual) => {
-    const nuevoRol = rolActual === 'ADMIN' ? 'USER' : 'ADMIN';
-    const { error } = await supabase
-      .from('perfiles')
-      .update({ rol: nuevoRol })
-      .eq('id', id);
+    if (currentUser?.id === id) {
+      alert("No puedes alterar tus propios permisos por seguridad. Pídele a otro Administrador que lo haga por ti.");
+      return;
+    }
 
-    if (!error) {
-      setUsuarios(usuarios.map(u => u.id === id ? { ...u, rol: nuevoRol } : u));
-    } else alert("Error al actualizar rol: " + error.message);
+    // Manejaremos mayúsculas y minúsculas por si la DB de perfiles heredada contiene 'admin' minúscula
+    const esAdmin = String(rolActual).toLowerCase() === 'admin';
+    const nuevoRol = esAdmin ? 'user' : 'admin';
+
+    const { data, error } = await supabase.functions.invoke('manage-users', {
+      body: { 
+        action: 'updateRole', 
+        targetUserId: id, 
+        newRole: nuevoRol 
+      }
+    });
+    
+    if (error) {
+       alert("Error contactando al servidor seguro para actualizar rol: " + error.message);
+    } else if (data && data.error) {
+       alert("Operación denegada: " + data.error);
+    } else {
+       // Operación legal exitosa
+       setUsuarios(usuarios.map(u => u.id === id ? { ...u, rol: nuevoRol } : u));
+    }
   };
 
   const eliminarUsuario = async (id) => {
-    const confirmar = window.confirm("¿Seguro que deseas eliminar este usuario de la plataforma?");
+    const confirmar = window.confirm("¿Seguro que deseas ELIMINAR este usuario de toda la plataforma? Ya no podrá iniciar sesión.");
     if (!confirmar) return;
 
-    const { error } = await supabase.from('perfiles').delete().eq('id', id);
-    if (!error) setUsuarios(usuarios.filter(u => u.id !== id));
-    else alert("Error al eliminar perfil:\n" + error.message);
+    setCargando(true);
+
+    const { data, error } = await supabase.functions.invoke('manage-users', {
+      body: { action: 'deleteUser', userId: id }
+    });
+
+    if (error) {
+      alert("Error contactando a la Edge Function remota:\n" + error.message);
+      setCargando(false);
+      return;
+    }
+
+    if (data && data.error) {
+      alert("Error desde el servidor:\n" + data.error);
+      setCargando(false);
+      return;
+    }
+
+    // Éxito
+    setUsuarios(usuarios.filter(u => u.id !== id));
+    setCargando(false);
   };
 
   const registrarUsuarioDirecto = async () => {
@@ -77,55 +103,35 @@ export default function TabUsuarios() {
 
     setProcesando(true);
 
-    // 1. Registrar Sigilosamente en Supabase Auth
-    const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-      email,
-      password
+    // INVOCACIÓN HACIA TU EDGE FUNCTION 'manage-users' (Heredada)
+    const { data, error } = await supabase.functions.invoke('manage-users', {
+      body: { 
+        action: 'createUser', 
+        userData: { email, password, nombre, cargo, rol } // El rol se manda en minúscula 'admin' como lo espera tu función remota
+      }
     });
 
-    if (authError) {
-      alert("Error al crear cuenta: " + authError.message);
+    if (error) {
+      alert("Hubo un fallo contactando al servidor lógico:\n" + error.message);
       setProcesando(false);
       return;
     }
 
-    const nuevoId = authData.user?.id;
-    if (!nuevoId) {
-      alert("Error: Supabase no devolvió el ID del nuevo usuario. Revisa la consola.");
-      setProcesando(false);
-      return;
+    if (data && data.error) {
+       alert("Error rechazado por Supabase Edge Function:\n" + data.error);
+       setProcesando(false);
+       return;
     }
 
-    if (!authData.session?.access_token) {
-      alert("Alerta de Seguridad RLS: Supabase creó la cuenta pero no otorgó credenciales de acceso directo.\nConsecuencia: La tabla 'perfiles' bloqueó el registro de su nombre y rol.\n\nPor favor verifica en Supabase -> Authentication que 'Confirm email' realmente este APAGADO, o elimina el usuario incompleto e inténtalo de nuevo.");
-      setProcesando(false);
-      return;
-    }
+    // Éxito. La función remota crea Auth y Perfil. Lo mostramos localmente:
+    const nuevoId = data.data?.id || (Math.random()*1000).toString(); // Fallback temporal para la key si no devuelva Auth 
+    setUsuarios([{ id: nuevoId, nombre, cargo, rol }, ...usuarios]);
+    
+    // Recarga todo por si la info viene diferente para prevenir ID faltantes
+    fetchUsuarios(); 
 
-    // 2. Insertar usando un TERCER mini-cliente inyectando EXACTAMENTE el token (Llave) del usuario recién nacido.
-    // Esto es 100% infalible si la sesión fue devuelta, porque para la base de datos, literalmente es el nuevo técnico guardando su propio perfil (Bypassing RLS auth.uid() = id limit).
-    const tokenClient = createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY,
-      { global: { headers: { Authorization: `Bearer ${authData.session.access_token}` } } }
-    );
-
-    const { error: profileError } = await tokenClient.from('perfiles').insert([{
-      id: nuevoId,
-      nombre,
-      cargo,
-      rol
-    }]);
-
-    if (profileError) {
-      alert("Aviso crítico: Cuenta creada pero hubo error guardando en perfiles: " + profileError.message);
-    } else {
-      // Éxito Total
-      setUsuarios([{ id: nuevoId, nombre, cargo, rol }, ...usuarios]);
-      setModalAbierto(false);
-      setFormConfig({ email: '', password: '', nombre: '', cargo: '', rol: 'USER' });
-    }
-
+    setModalAbierto(false);
+    setFormConfig({ email: '', password: '', nombre: '', cargo: '', rol: 'user' });
     setProcesando(false);
   };
 
@@ -168,7 +174,7 @@ export default function TabUsuarios() {
                   {user.cargo || 'Sin cargo asignado'}
                 </td>
                 <td className="py-4 px-2">
-                  <span className={`text-[10px] uppercase font-black tracking-wider px-3 py-1.5 rounded-full ${user.rol === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'}`}>
+                  <span className={`text-[10px] uppercase font-black tracking-wider px-3 py-1.5 rounded-full ${String(user.rol).toUpperCase() === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'}`}>
                     {user.rol || 'USER'}
                   </span>
                 </td>
@@ -230,8 +236,8 @@ export default function TabUsuarios() {
                     onChange={e => setFormConfig({ ...formConfig, rol: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:bg-white"
                   >
-                    <option value="USER">Permisos Limitados (USER)</option>
-                    <option value="ADMIN">Administrador (ADMIN)</option>
+                    <option value="user">Permisos Limitados (USER)</option>
+                    <option value="admin">Acceso Total (ADMIN)</option>
                   </select>
                 </div>
               </div>
